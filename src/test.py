@@ -27,7 +27,7 @@ from models.model_utils import create_model
 from utils.misc import make_folder
 from utils.evaluation_utils import post_processing, rescale_boxes, post_processing_v2
 from utils.misc import time_synchronized
-from utils.visualization_utils import show_image_with_boxes, merge_rgb_to_bev, predictions_to_kitti_format
+
 
 
 def parse_test_configs():
@@ -91,15 +91,19 @@ if __name__ == '__main__':
     configs = parse_test_configs()
     configs.distributed = False  # For testing
 
+    if configs.show_image:
+        # on ARM platform , don't draw pictures
+        from utils.visualization_utils import show_image_with_boxes, merge_rgb_to_bev, predictions_to_kitti_format
+
     model = create_model(configs)
     model.print_network()
     print('\n\n' + '-*=' * 30 + '\n\n')
     assert os.path.isfile(configs.pretrained_path), "No file at {}".format(configs.pretrained_path)
     model.load_state_dict(torch.load(configs.pretrained_path,map_location='cuda:0'))
-
+    
     configs.device = torch.device('cpu' if configs.no_cuda else 'cuda:{}'.format(configs.gpu_idx))
     model = model.to(device=configs.device)
-
+    
     out_cap = None
 
     model.eval()
@@ -112,10 +116,14 @@ if __name__ == '__main__':
             outputs = model(input_imgs)
             t2 = time_synchronized()
             detections = post_processing_v2(outputs, conf_thresh=configs.conf_thresh, nms_thresh=configs.nms_thresh)
+            if not configs.show_image:
+                print('\tDone testing the {}th sample, time: {:.1f}ms, speed {:.2f}FPS'.format(batch_idx, (t2 - t1) * 1000,
+                                                                                1 / (t2 - t1)))
+                # print("\t\tdetection:",detections)
+                continue
 
             img_detections = []  # Stores detections for each image index
             img_detections.extend(detections)
-
             img_bev = imgs_bev.squeeze() * 255
             img_bev = img_bev.permute(1, 2, 0).numpy().astype(np.uint8)
             img_bev = cv2.resize(img_bev, (configs.img_size, configs.img_size))
